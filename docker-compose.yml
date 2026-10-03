@@ -1,0 +1,31 @@
+services:
+  chat:
+    build: .
+    env_file: .env
+    ports:
+      - "8001:8001"
+    volumes:
+      - chat_uploads:/app/uploads
+    depends_on:
+      chat_db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  chat_db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-chat_service}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - chat_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  chat_uploads:
+  chat_postgres_data:
