@@ -15,3 +15,6 @@ DATABASE_URL = DATABASE_URL.replace('postgresql://', 'postgresql+asyncpg://')
 UPLOAD_DIR = os.getenv('UPLOAD_DIR', 'uploads')
 MAX_FILE_SIZE_MB = int(os.getenv('MAX_FILE_SIZE_MB', '50'))
 MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024
+
+
+AUTH_SERVICE_URL = os.environ['AUTH_SERVICE_URL']

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy import select, func
-from chat_service.api.auth import get_current_user, get_member, get_member_ids
+from chat_service.api.authentication import get_current_user
+from chat_service.api.authorization import get_chat_member, get_chat_member_ids
 from chat_service.api.file import save_file_to_disk, delete_file_from_disk
 from chat_service.api.websocket import send_to_users
 from chat_service.database.db import get_db
@@ -38,7 +39,7 @@ async def save_and_send(db, chat_id, sender_id, **fields):
     db.add(message)
     await db.commit()
 
-    member_ids = await get_member_ids(db, chat_id)
+    member_ids = await get_chat_member_ids(db, chat_id)
     await send_to_users(member_ids, {'type': 'new_message', 'message': message_to_dict(message)})
     return message
 
@@ -51,7 +52,7 @@ async def send_text_message(
     user_id=Depends(get_current_user),
 ):
     text = clean_text(data.text)
-    await get_member(db, chat_id, user_id)
+    await get_chat_member(db, chat_id, user_id)  # проверяем участника чата
     await check_reply(db, chat_id, data.reply_to_id)
     return await save_and_send(
         db, chat_id, user_id,
@@ -69,7 +70,7 @@ async def send_file_message(
     db=Depends(get_db),
     user_id=Depends(get_current_user),
 ):
-    await get_member(db, chat_id, user_id)
+    await get_chat_member(db, chat_id, user_id)  # проверяем участника чата
     await check_reply(db, chat_id, reply_to_id)
 
     file_info = await save_file_to_disk(chat_id, file)
@@ -80,6 +81,7 @@ async def send_file_message(
         **file_info,
     )
 
+
 @router.get('/chats/{chat_id}/messages', response_model=list[MessageResponse])
 async def get_messages(
     chat_id: int,
@@ -88,8 +90,8 @@ async def get_messages(
     db=Depends(get_db),
     user_id=Depends(get_current_user),
 ):
+    await get_chat_member(db, chat_id, user_id)  # проверяем участника чата
 
-    await get_member(db, chat_id, user_id)
     if limit > 100:
         limit = 100
 
@@ -102,7 +104,6 @@ async def get_messages(
     return result.scalars().all()
 
 
-
 @router.patch('/messages/{message_id}', response_model=MessageResponse)
 async def edit_message(
     message_id: int,
@@ -110,11 +111,11 @@ async def edit_message(
     db=Depends(get_db),
     user_id=Depends(get_current_user),
 ):
-
     message = await db.get(Message, message_id)
     if message is None:
         raise HTTPException(status_code=404, detail='Сообщение не найдено')
-    await get_member(db, message.chat_id, user_id)
+
+    await get_chat_member(db, message.chat_id, user_id)  # проверяем участника чата
 
     if message.sender_id != user_id:
         raise HTTPException(status_code=403, detail='Можно менять только свои сообщения')
@@ -125,7 +126,7 @@ async def edit_message(
     message.is_edited = True
     await db.commit()
 
-    member_ids = await get_member_ids(db, message.chat_id)
+    member_ids = await get_chat_member_ids(db, message.chat_id)
     await send_to_users(member_ids, {'type': 'message_edited', 'message': message_to_dict(message)})
     return message
 
@@ -139,7 +140,8 @@ async def delete_message(
     message = await db.get(Message, message_id)
     if message is None:
         raise HTTPException(status_code=404, detail='Сообщение не найдено')
-    member = await get_member(db, message.chat_id, user_id)
+
+    member = await get_chat_member(db, message.chat_id, user_id)  # получаем участника чата
 
     if message.sender_id != user_id and not member.is_admin:
         raise HTTPException(status_code=403, detail='Нельзя удалить чужое сообщение')
@@ -157,7 +159,7 @@ async def delete_message(
     message.duration_seconds = None
     await db.commit()
 
-    member_ids = await get_member_ids(db, message.chat_id)
+    member_ids = await get_chat_member_ids(db, message.chat_id)
     await send_to_users(member_ids, {
         'type': 'message_deleted', 'chat_id': message.chat_id, 'message_id': message.id,
     })
@@ -171,7 +173,7 @@ async def mark_as_read(
     db=Depends(get_db),
     user_id=Depends(get_current_user),
 ):
-    member = await get_member(db, chat_id, user_id)
+    member = await get_chat_member(db, chat_id, user_id)  # получаем участника чата
 
     result = await db.execute(select(func.max(Message.id)).where(Message.chat_id == chat_id))
     newest_id = result.scalar() or 0
@@ -181,7 +183,7 @@ async def mark_as_read(
         member.last_read_message_id = last_read_id
         await db.commit()
 
-        member_ids = await get_member_ids(db, chat_id)
+        member_ids = await get_chat_member_ids(db, chat_id)
         await send_to_users(member_ids, {
             'type': 'messages_read', 'chat_id': chat_id,
             'user_id': user_id, 'last_message_id': last_read_id,

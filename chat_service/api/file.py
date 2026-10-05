@@ -1,10 +1,11 @@
 import os
 import shutil
 import uuid
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
-from chat_service.api.auth import get_user_id_from_token, get_member
+from chat_service.api.authentication import get_current_user
+from chat_service.api.authorization import get_chat_member
 from chat_service.config import UPLOAD_DIR, MAX_FILE_SIZE, MAX_FILE_SIZE_MB
 from chat_service.database.db import get_db
 
@@ -28,12 +29,11 @@ async def save_file_to_disk(chat_id, file):
         raise HTTPException(status_code=413, detail=f'Файл больше {MAX_FILE_SIZE_MB} МБ')
 
     original_name = os.path.basename(file.filename or 'file')[-100:]
-    saved_name = uuid.uuid4().hex + '_' + original_name   # uuid, чтобы имена не совпадали
+    saved_name = uuid.uuid4().hex + '_' + original_name  # уникальное имя файла
 
     folder = os.path.join(UPLOAD_DIR, str(chat_id))
     os.makedirs(folder, exist_ok=True)
     with open(os.path.join(folder, saved_name), 'wb') as f:
-        # копируем в отдельном потоке, чтобы сервер не вис на больших файлах
         await run_in_threadpool(shutil.copyfileobj, file.file, f)
 
     content_type = file.content_type or 'application/octet-stream'
@@ -46,7 +46,7 @@ async def save_file_to_disk(chat_id, file):
 
 
 def delete_file_from_disk(file_url):
-    # file_url выглядит так: /files/5/abc123_photo.jpg
+    # удаляем файл с диска
     parts = file_url.split('/')
     path = os.path.join(UPLOAD_DIR, parts[2], os.path.basename(parts[3]))
     if os.path.isfile(path):
@@ -54,14 +54,22 @@ def delete_file_from_disk(file_url):
 
 
 @router.get('/files/{chat_id}/{filename}')
-async def download_file(chat_id: int, filename: str, token: str, db=Depends(get_db)):
-    user_id = get_user_id_from_token(token)
-    if user_id is None:
-        raise HTTPException(status_code=401, detail='Токен неверный или просрочен')
-    await get_member(db, chat_id, user_id)
+async def download_file(
+    chat_id: int,
+    filename: str,
+    db=Depends(get_db),
+    user_id=Depends(get_current_user),
+):
+    await get_chat_member(db, chat_id, user_id)  # проверяем участника чата
 
-    path = os.path.join(UPLOAD_DIR, str(chat_id), os.path.basename(filename))  # basename убирает "../"
+    path = os.path.join(UPLOAD_DIR, str(chat_id), os.path.basename(filename))
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail='Файл не найден')
 
-    return FileResponse(path, headers={'Content-Security-Policy': 'sandbox', 'X-Content-Type-Options': 'nosniff'})
+    return FileResponse(
+        path,
+        headers={
+            'Content-Security-Policy': 'sandbox',
+            'X-Content-Type-Options': 'nosniff',
+        },
+    )

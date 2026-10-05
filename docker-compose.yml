@@ -1,7 +1,9 @@
 services:
+
   chat:
     build: .
-    env_file: .env
+    env_file:
+      - .env
     ports:
       - "8001:8001"
     volumes:
@@ -9,6 +11,8 @@ services:
     depends_on:
       chat_db:
         condition: service_healthy
+    networks:
+      - motion_network
     restart: unless-stopped
 
   chat_db:
@@ -25,7 +29,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - motion_network
 
 volumes:
   chat_uploads:
   chat_postgres_data:
+
+networks:
+  motion_network:
+    external: true

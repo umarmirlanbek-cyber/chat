@@ -1,10 +1,10 @@
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from api import chat, message, file, websocket
-from config import UPLOAD_DIR
-from database import models
-from database.db import engine, Base
+from chat_service.api import message, file, websocket
+from chat_service.api import chat
+from chat_service.config import UPLOAD_DIR
+from chat_service.database.db import engine, Base
 
 
 @asynccontextmanager
